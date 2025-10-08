@@ -764,12 +764,22 @@ Please analyze this dataset and provide:
 def comparison_tab_ui():
     """Render Tab 4 - Comparison (multiple datasets)."""
     st.header("📈 Dataset Comparison")
-    st.info("Upload or paste multiple datasets for comparative analysis.")
+    st.info("Upload or paste multiple datasets to compare them side-by-side with agent analysis.")
 
-    uploaded_list = st.file_uploader("Upload multiple files", type=["csv", "json", "txt"], accept_multiple_files=True, key="tab4_uploader")
-    pasted_multi = st.text_area("Or paste datasets (separate with '---')", height=160, key="tab4_pasted")
+    uploaded_list = st.file_uploader(
+        "Upload multiple files (csv/json/txt)", 
+        type=["csv", "json", "txt"], 
+        accept_multiple_files=True,
+        key="tab4_uploader"
+    )
+    pasted_multi = st.text_area(
+        "Or paste multiple datasets separated by '---' (three dashes)", 
+        height=160,
+        key="tab4_pasted"
+    )
 
     datasets = {}
+    
     if uploaded_list:
         for f in uploaded_list:
             try:
@@ -788,27 +798,26 @@ def comparison_tab_ui():
                 st.warning(f"Failed to parse pasted dataset #{idx+1}: {e}")
 
     if not datasets:
-        st.warning("⚠️ No datasets loaded. Please upload files or paste data above.")
+        st.warning("⚠️ No datasets loaded yet. Please upload files or paste data above.")
         return
 
     st.divider()
-    st.markdown(f"#### Preview & Edit Datasets ({len(datasets)} loaded)")
+    st.markdown(f"#### 📊 Loaded Datasets ({len(datasets)})")
+    
     edited_datasets = {}
+    json_map = {}
+    
     for name, df in datasets.items():
-        with st.expander(f"📊 {name}"):
+        with st.expander(f"📁 {name} ({df.shape[0]} rows × {df.shape[1]} cols)"):
             df = make_editable(df)
             edited = st.data_editor(df, key=f"cmp_editor_{name}", num_rows="dynamic", use_container_width=True)
             edited_datasets[name] = edited
+            
+            jtext = df_to_json_pretty(edited)
+            new_json = st.text_area(f"JSON for {name}", value=jtext, key=f"cmp_json_{name}", height=180)
+            json_map[name] = new_json
 
-    st.divider()
-    st.markdown("#### JSON Representations")
-    json_map = {}
-    for name, df in edited_datasets.items():
-        jtext = df_to_json_pretty(df)
-        new_json = st.text_area(f"JSON - {name}", value=jtext, key=f"cmp_json_{name}", height=180)
-        json_map[name] = new_json
-
-    if st.button("✅ Apply edited JSONs to tables", key="tab4_apply_json"):
+    if st.button("✅ Apply all JSON edits", key="tab4_apply_json"):
         applied = {}
         errors = []
         for name, jtext in json_map.items():
@@ -817,6 +826,7 @@ def comparison_tab_ui():
                 applied[name] = newdf
             except Exception as e:
                 errors.append(f"{name}: {e}")
+        
         if errors:
             st.error("Some JSONs failed to parse:\n" + "\n".join(errors))
         else:
@@ -825,10 +835,10 @@ def comparison_tab_ui():
             st.rerun()
 
     st.divider()
-    st.markdown("#### Select Agent & Configure")
+    st.markdown("#### 🤖 Select Agent for Comparative Analysis")
     
     if not st.session_state.squads:
-        st.error("No agents loaded.")
+        st.error("No agents loaded. Please ensure agents.yaml exists.")
         return
 
     flat_agents = {}
@@ -836,20 +846,25 @@ def comparison_tab_ui():
         for aname, cfg in agents.items():
             flat_agents[f"{sname} / {aname}"] = cfg
 
-    selected_agent_key = st.selectbox("Choose agent", options=list(flat_agents.keys()), key="tab4_agent_select")
+    selected_agent_key = st.selectbox("Choose comparative agent", options=list(flat_agents.keys()), key="tab4_agent_select")
     agent_cfg = copy.deepcopy(flat_agents[selected_agent_key])
 
     with st.expander("⚙️ Agent Configuration", expanded=False):
-        agent_cfg['system_prompt'] = st.text_area("System Prompt", value=agent_cfg.get('system_prompt', ''), height=150, key="tab4_prompt")
+        agent_cfg['system_prompt'] = st.text_area(
+            "System Prompt", 
+            value=agent_cfg.get('system_prompt', ''),
+            height=150,
+            key="tab4_prompt"
+        )
         
         params = agent_cfg.get('params', {})
         col1, col2, col3 = st.columns(3)
         with col1:
-            p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="tab4_temp")
+            p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="cmp_temp")
         with col2:
-            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab4_tp")
+            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="cmp_tp")
         with col3:
-            p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 3072)), 256, key="tab4_max")
+            p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 3072)), 256, key="cmp_max")
         agent_cfg['params'] = {'temperature': p_temp, 'top_p': p_top_p, 'max_output_tokens': p_max}
 
     st.divider()
@@ -867,18 +882,20 @@ def comparison_tab_ui():
                 except Exception:
                     assembled[name] = jtext
             
-            content_for_agent = f"""COMPARE DATASETS:
+            content_for_agent = f"""COMPARE THESE DATASETS:
+
 {json.dumps(assembled, ensure_ascii=False, indent=2)}
 
-Please compare these datasets and provide:
+Please provide a comprehensive comparative analysis including:
 1. Schema comparison (columns, data types)
-2. Distribution analysis
+2. Statistical comparison (distributions, ranges, missing values)
 3. Key differences and similarities
 4. Potential join keys or relationships
-5. Recommendations for visualization and further analysis
+5. Recommendations for merging or further analysis
+6. Suggested visualizations for comparison
 """
             
-            with st.spinner(f"Agent '{agent_cfg['name']}' is comparing datasets..."):
+            with st.spinner("Running comparative analysis..."):
                 result = executor.execute(agent_cfg, content_for_agent, context=None)
                 st.session_state.comparison_results = result
                 st.rerun()
@@ -887,14 +904,14 @@ Please compare these datasets and provide:
         res = st.session_state.comparison_results
         if res.get('status') == 'success':
             st.divider()
-            st.success("✅ Comparison Complete!")
+            st.success("✅ Comparative Analysis Complete!")
             agent_text = res.get('result', '')
             
-            with st.expander("📄 View Full Report", expanded=True):
+            with st.expander("📄 View Full Comparison Report", expanded=True):
                 st.markdown(agent_text)
             
             st.download_button(
-                label="💾 Download Report (Markdown)",
+                label="💾 Download Comparison Report",
                 data=agent_text,
                 file_name=f"comparison_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
                 mime="text/markdown"
@@ -903,249 +920,73 @@ Please compare these datasets and provide:
             st.error(f"❌ Agent Error: {res.get('error')}")
 
 # =============================================================================
-# TAB 5: DOCUMENT OCR (Original)
+# TAB 5: DOCUMENT OCR (LEGACY)
 # =============================================================================
 
 def tab5_ui():
-    """Render Tab 5 - Document OCR & Agent (Original Implementation)."""
-    st.header("📄 Document OCR & Analysis (Original)")
-    st.info("Upload or paste a document. Extract text and run agent analysis.")
+    """Legacy Tab 5 - Document OCR."""
+    st.header("📄 Document OCR & Analysis (Legacy)")
+    st.info("⚠️ This is a legacy tab. Please use Tab 7 for improved document analysis.")
     
-    uploaded = st.file_uploader("Upload TXT/PDF", type=["txt", "pdf"], key="tab5_uploader")
-    pasted = st.text_area("Or paste text", key="tab5_pasted", height=160)
-    pages = st.text_input("PDF pages (comma-separated, e.g., '0,2,5')", key="tab5_pages")
+    st.markdown("This tab has been superseded by **Tab 7: Document Scientist**")
     
-    content = ""
-    if uploaded:
-        if uploaded.name.endswith(".pdf"):
-            pages_list = None
-            if pages:
-                try:
-                    pages_list = [int(p.strip()) for p in pages.split(",")]
-                except:
-                    st.warning("Invalid page numbers")
-            content = extract_text_from_pdf(uploaded, pages_list)
-        else:
-            content = uploaded.read().decode("utf-8")
-    elif pasted:
-        content = pasted
-
-    if not content:
-        st.warning("⚠️ No content loaded. Please upload or paste a document.")
-        return
-
-    st.divider()
-    st.markdown("#### Extracted Content")
-    edited_content = st.text_area("Edit content if needed", content, height=300, key="tab5_content")
-
-    st.divider()
-    st.markdown("#### Select Agent & Configure")
-    
-    if not st.session_state.squads:
-        st.error("No agents loaded.")
-        return
-
-    flat_agents = {}
-    for sname, agents in st.session_state.squads.items():
-        for aname, cfg in agents.items():
-            flat_agents[f"{sname} / {aname}"] = cfg
-
-    selected_agent_key = st.selectbox("Choose agent", options=list(flat_agents.keys()), key="tab5_agent_select")
-    agent_cfg = copy.deepcopy(flat_agents[selected_agent_key])
-
-    with st.expander("⚙️ Agent Configuration", expanded=False):
-        agent_cfg['system_prompt'] = st.text_area("System Prompt", value=agent_cfg.get('system_prompt', ''), height=150, key="tab5_prompt")
-        
-        params = agent_cfg.get('params', {})
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="tab5_temp")
-        with col2:
-            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab5_tp")
-        with col3:
-            p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 4096)), 256, key="tab5_max")
-        agent_cfg['params'] = {'temperature': p_temp, 'top_p': p_top_p, 'max_output_tokens': p_max}
-
-    st.divider()
-    if st.button("🚀 Run Document Analysis", type="primary", key="tab5_run"):
-        if not st.session_state.selected_model:
-            st.error("No model selected in sidebar.")
-        else:
-            client = st.session_state.gemini_client if 'gemini' in st.session_state.selected_model else st.session_state.grok_client
-            executor = AgentExecutor(st.session_state.selected_model, client)
-            
-            with st.spinner(f"Agent '{agent_cfg['name']}' is analyzing document..."):
-                result = executor.execute(agent_cfg, edited_content, context=None)
-                st.session_state.analysis_result = result
-                st.rerun()
-
-    if st.session_state.analysis_result:
-        res = st.session_state.analysis_result
-        if res.get('status') == 'success':
-            st.divider()
-            st.success("✅ Analysis Complete!")
-            agent_text = res.get('result', '')
-            
-            with st.expander("📄 View Full Report", expanded=True):
-                st.markdown(agent_text)
-            
-            st.download_button(
-                label="💾 Download Report (Markdown)",
-                data=agent_text,
-                file_name=f"document_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown"
-            )
-        else:
-            st.error(f"❌ Agent Error: {res.get('error')}")
+    if st.button("Go to Tab 7", key="tab5_redirect"):
+        st.info("Please click on the 'Document Scientist' tab above.")
 
 # =============================================================================
-# TAB 6: MULTI-DATASET ANALYSIS (Original)
+# TAB 6: MULTI-DATASET (LEGACY)
 # =============================================================================
 
 def tab6_ui():
-    """Render Tab 6 - Multi-dataset Analysis (Original Implementation)."""
-    st.header("📊 Multi-Dataset Analysis (Original)")
-    st.info("Upload multiple datasets for comprehensive analysis.")
+    """Legacy Tab 6 - Multi-dataset Analysis."""
+    st.header("📊 Multi-dataset Analysis (Legacy)")
+    st.info("⚠️ This is a legacy tab. Please use Tab 8 for improved multi-dataset analysis.")
     
-    uploaded = st.file_uploader("Upload datasets", type=["txt", "csv", "json"], accept_multiple_files=True, key="tab6_uploader")
-    pasted = st.text_area("Or paste dataset content", key="tab6_pasted", height=160)
-
-    datasets = {}
-    if uploaded:
-        for file in uploaded:
-            dsid = file.name
-            try:
-                if file.name.endswith(".csv"):
-                    df = pd.read_csv(file)
-                elif file.name.endswith(".json"):
-                    df = pd.read_json(file)
-                else:
-                    df = pd.DataFrame({"text": file.read().decode("utf-8").splitlines()})
-                datasets[dsid] = df
-            except Exception as e:
-                st.warning(f"Could not load {file.name}: {e}")
-    elif pasted:
-        dsid = f"pasted_{int(time.time())}"
-        df = pd.DataFrame({"text": pasted.splitlines()})
-        datasets[dsid] = df
-
-    if not datasets:
-        st.warning("⚠️ No datasets loaded.")
-        return
-
-    st.divider()
-    st.markdown(f"#### Datasets Loaded ({len(datasets)})")
-    for i, (dsid, df) in enumerate(datasets.items()):
-        with st.expander(f"📊 {dsid}"):
-            st.dataframe(df.head(10))
-            json_data = df.to_json(orient="records")
-            st.text_area(f"JSON for {dsid}", json_data, height=150, key=f"tab6_json_{i}")
-
-    st.divider()
-    st.markdown("#### Select Agent & Configure")
+    st.markdown("This tab has been superseded by **Tab 8: Deep Learning Scientist**")
     
-    if not st.session_state.squads:
-        st.error("No agents loaded.")
-        return
-
-    flat_agents = {}
-    for sname, agents in st.session_state.squads.items():
-        for aname, cfg in agents.items():
-            flat_agents[f"{sname} / {aname}"] = cfg
-
-    selected_agent_key = st.selectbox("Choose agent", options=list(flat_agents.keys()), key="tab6_agent_select")
-    agent_cfg = copy.deepcopy(flat_agents[selected_agent_key])
-
-    with st.expander("⚙️ Agent Configuration", expanded=False):
-        agent_cfg['system_prompt'] = st.text_area("System Prompt", value=agent_cfg.get('system_prompt', ''), height=150, key="tab6_prompt")
-        
-        params = agent_cfg.get('params', {})
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="tab6_temp")
-        with col2:
-            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab6_tp")
-        with col3:
-            p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 8192)), 256, key="tab6_max")
-        agent_cfg['params'] = {'temperature': p_temp, 'top_p': p_top_p, 'max_output_tokens': p_max}
-
-    st.divider()
-    if st.button("🚀 Run Multi-Dataset Analysis", type="primary", key="tab6_run"):
-        if not st.session_state.selected_model:
-            st.error("No model selected in sidebar.")
-        else:
-            client = st.session_state.gemini_client if 'gemini' in st.session_state.selected_model else st.session_state.grok_client
-            executor = AgentExecutor(st.session_state.selected_model, client)
-            
-            assembled = {}
-            for dsid, df in datasets.items():
-                assembled[dsid] = df.to_dict(orient="records")
-            
-            content_for_agent = f"""MULTI-DATASET ANALYSIS:
-{json.dumps(assembled, indent=2, ensure_ascii=False)}
-
-Please provide comprehensive analysis including:
-1. Summary of each dataset
-2. Cross-dataset patterns and relationships
-3. Data quality assessment
-4. Recommendations for visualization
-5. Insights and actionable findings
-"""
-            
-            with st.spinner(f"Agent '{agent_cfg['name']}' is analyzing datasets..."):
-                result = executor.execute(agent_cfg, content_for_agent, context=None)
-                st.session_state.analysis_result = result
-                st.rerun()
-
-    if st.session_state.analysis_result:
-        res = st.session_state.analysis_result
-        if res.get('status') == 'success':
-            st.divider()
-            st.success("✅ Analysis Complete!")
-            agent_text = res.get('result', '')
-            
-            with st.expander("📄 View Full Report", expanded=True):
-                st.markdown(agent_text)
-            
-            st.download_button(
-                label="💾 Download Report (Markdown)",
-                data=agent_text,
-                file_name=f"multi_dataset_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown"
-            )
-        else:
-            st.error(f"❌ Agent Error: {res.get('error')}")
+    if st.button("Go to Tab 8", key="tab6_redirect"):
+        st.info("Please click on the 'Deep Learning Scientist' tab above.")
 
 # =============================================================================
-# TAB 7: DOCUMENT SCIENTIST (Enhanced)
+# TAB 7: DOCUMENT SCIENTIST
 # =============================================================================
 
 def tab7_ui():
-    """Render Tab 7 - Document Scientist (Enhanced Version)."""
+    """Render Tab 7 - Document Scientist (Improved OCR & Analysis)."""
     st.header("📄 Document Scientist")
-    st.info("Advanced document analysis with OCR, entity extraction, and Q&A generation.")
+    st.info("Upload or paste a document (TXT/PDF). Extract text, edit it, and run agent analysis.")
     
-    uploaded = st.file_uploader("Upload TXT/PDF", type=["txt", "pdf"], key="tab7_uploader")
-    pasted = st.text_area("Or paste text/markdown", key="tab7_pasted", height=160)
-    
-    pages_str = st.text_input("For PDF, specify pages (e.g., '0,2,5-7'). Leave blank for all.", key="tab7_pages")
-    
+    with st.expander("📁 1) Upload or Paste Document", expanded=True):
+        uploaded = st.file_uploader("Upload TXT/PDF", type=["txt", "pdf"], key="tab7_uploader")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            pasted = st.text_area("Or paste text/markdown here", height=160, key="tab7_pasted")
+        with col2:
+            pages_str = st.text_input(
+                "PDF pages (optional)", 
+                placeholder="e.g., 0,2,5-7",
+                help="Leave blank for all pages"
+            )
+
     content = ""
     if uploaded:
-        if uploaded.type == "application/pdf":
+        if uploaded.type == "application/pdf" or uploaded.name.endswith('.pdf'):
             pages = None
             if pages_str:
                 try:
                     pages = []
                     for part in pages_str.split(','):
+                        part = part.strip()
                         if '-' in part:
                             start, end = map(int, part.split('-'))
                             pages.extend(range(start, end + 1))
                         else:
-                            pages.append(int(part.strip()))
+                            pages.append(int(part))
                 except ValueError:
-                    st.warning("Invalid page range. Using all pages.")
+                    st.warning("Invalid page range format. Using all pages.")
                     pages = None
+            
             with st.spinner("Extracting text from PDF..."):
                 content = extract_text_from_pdf(uploaded, pages)
         else:
@@ -1154,18 +995,24 @@ def tab7_ui():
         content = pasted
 
     if not content:
-        st.warning("⚠️ No content loaded. Please upload or paste a document.")
+        st.warning("⚠️ No document loaded yet. Please upload a file or paste content above.")
         return
 
     st.divider()
-    st.markdown("#### Extracted Content")
-    edited_content = st.text_area("Edit extracted content", content, height=300, key="tab7_content")
+    st.markdown("#### 2) Review & Edit Extracted Content")
+    edited_content = st.text_area(
+        "Editable Content", 
+        content, 
+        height=300, 
+        key="tab7_content_area",
+        help="Edit the extracted text before analysis"
+    )
 
     st.divider()
-    st.markdown("#### Select Agent & Configure")
+    st.markdown("#### 3) Select Agent & Configure")
     
     if not st.session_state.squads:
-        st.error("No agents loaded.")
+        st.error("No agents loaded. Please ensure agents.yaml exists.")
         return
 
     flat_agents = {}
@@ -1173,45 +1020,49 @@ def tab7_ui():
         for aname, cfg in agents.items():
             flat_agents[f"{sname} / {aname}"] = cfg
 
-    selected_agent_key = st.selectbox("Choose agent", options=list(flat_agents.keys()), key="tab7_agent_select")
+    selected_agent_key = st.selectbox("Choose an agent", options=list(flat_agents.keys()), key="tab7_agent_select")
     agent_cfg = copy.deepcopy(flat_agents[selected_agent_key])
 
     with st.expander("⚙️ Agent Configuration", expanded=False):
-        agent_cfg['system_prompt'] = st.text_area("System Prompt", value=agent_cfg.get('system_prompt', ''), height=150, key="tab7_prompt")
+        agent_cfg['system_prompt'] = st.text_area(
+            "System Prompt", 
+            value=agent_cfg.get('system_prompt', ''),
+            height=150,
+            key="tab7_prompt"
+        )
         
         params = agent_cfg.get('params', {})
         col1, col2, col3 = st.columns(3)
         with col1:
             p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="tab7_temp")
         with col2:
-            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab7_tp")
+            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab7_top_p")
         with col3:
             p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 4096)), 256, key="tab7_max")
         agent_cfg['params'] = {'temperature': p_temp, 'top_p': p_top_p, 'max_output_tokens': p_max}
 
     st.divider()
-    if st.button("🚀 Run Document Scientist Analysis", type="primary", key="tab7_run"):
+    if st.button("🚀 Run Document Analysis", type="primary", key="tab7_run"):
         if not st.session_state.selected_model:
-            st.error("No model selected in sidebar.")
+            st.error("Please select a model from the sidebar.")
         else:
             client = st.session_state.gemini_client if 'gemini' in st.session_state.selected_model else st.session_state.grok_client
             executor = AgentExecutor(st.session_state.selected_model, client)
             
-            analysis_prompt = f"""DOCUMENT FOR SCIENTIFIC ANALYSIS:
+            content_for_agent = f"""DOCUMENT CONTENT:
+
 {edited_content}
 
-Please provide a comprehensive scientific analysis including:
-1. Executive Summary
-2. Key Entities and Concepts (extract top 20-30)
-3. Main Themes and Topics
-4. Critical Analysis and Insights
-5. 10-15 Key Questions & Answers based on the content
-6. Follow-up Research Suggestions
-7. Methodology Assessment (if applicable)
+Please analyze this document and provide:
+1. Summary of main topics and themes
+2. Key entities (people, organizations, locations, dates)
+3. Important insights and findings
+4. Action items or recommendations (if applicable)
+5. Questions for further investigation
 """
             
-            with st.spinner(f"Agent '{agent_cfg['name']}' is performing scientific analysis..."):
-                result = executor.execute(agent_cfg, analysis_prompt, context=None)
+            with st.spinner(f"Agent '{agent_cfg['name']}' is analyzing the document..."):
+                result = executor.execute(agent_cfg, content_for_agent, context=None)
                 st.session_state.document_analysis_result = result
                 st.rerun()
 
@@ -1222,28 +1073,43 @@ Please provide a comprehensive scientific analysis including:
             st.success("✅ Document Analysis Complete!")
             agent_text = res.get('result', '')
             
-            with st.expander("📄 View Full Scientific Report", expanded=True):
+            with st.expander("📄 View Full Analysis", expanded=True):
                 st.markdown(agent_text)
             
-            st.download_button(
-                label="💾 Download Scientific Report (Markdown)",
-                data=agent_text,
-                file_name=f"document_scientist_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown"
-            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="💾 Download Analysis Report",
+                    data=agent_text,
+                    file_name=f"document_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown"
+                )
+            with col2:
+                st.download_button(
+                    label="💾 Download Original Content",
+                    data=edited_content,
+                    file_name=f"document_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain"
+                )
         else:
             st.error(f"❌ Agent Error: {res.get('error')}")
 
 # =============================================================================
-# TAB 8: DEEP LEARNING SCIENTIST (Enhanced)
+# TAB 8: DEEP LEARNING SCIENTIST
 # =============================================================================
 
 def tab8_ui():
-    """Render Tab 8 - Deep Learning Scientist (Enhanced Version)."""
-    st.header("📊 Deep Learning Scientist")
-    st.info("Advanced multi-dataset analysis with deep learning insights and recommendations.")
+    """Render Tab 8 - Deep Learning Scientist (Advanced Multi-dataset Analysis)."""
+    st.header("🧠 Deep Learning Scientist")
+    st.info("Upload multiple datasets for comprehensive deep learning and ML analysis with advanced insights.")
 
-    uploaded = st.file_uploader("Upload datasets (CSV, JSON, TXT)", type=["csv", "json", "txt"], accept_multiple_files=True, key="tab8_uploader")
+    with st.expander("📁 1) Upload Multiple Datasets", expanded=True):
+        uploaded = st.file_uploader(
+            "Upload datasets (CSV, JSON, TXT)", 
+            type=["csv", "json", "txt"], 
+            accept_multiple_files=True, 
+            key="tab8_uploader"
+        )
 
     datasets = {}
     if uploaded:
@@ -1255,43 +1121,79 @@ def tab8_ui():
                 st.warning(f"Could not load {file.name}: {e}")
 
     if not datasets:
-        st.warning("⚠️ Please upload one or more datasets to begin deep learning analysis.")
+        st.warning("⚠️ Please upload one or more datasets to begin analysis.")
         return
 
     st.divider()
-    st.markdown(f"#### Edit Datasets as JSON ({len(datasets)} loaded)")
+    st.markdown(f"#### 📊 Dataset Overview ({len(datasets)} datasets loaded)")
+    
     json_map = {}
+    summary_stats = []
+    
     for dsid, df in datasets.items():
-        with st.expander(f"📊 Dataset: {dsid}"):
-            st.dataframe(df.head(10))
+        with st.expander(f"📁 {dsid} ({df.shape[0]} rows × {df.shape[1]} cols)"):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.dataframe(df.head(10), use_container_width=True)
+            
+            with col2:
+                st.markdown("**Quick Stats:**")
+                st.metric("Rows", df.shape[0])
+                st.metric("Columns", df.shape[1])
+                st.metric("Missing", df.isnull().sum().sum())
+            
             json_data = df_to_json_pretty(df)
-            edited_json = st.text_area(f"Editable JSON for {dsid}", json_data, height=250, key=f"tab8_json_{dsid}")
+            edited_json = st.text_area(
+                f"Editable JSON for {dsid}", 
+                json_data, 
+                height=200, 
+                key=f"json_edit_{dsid}"
+            )
             json_map[dsid] = edited_json
+            
+            summary_stats.append({
+                "Dataset": dsid,
+                "Rows": df.shape[0],
+                "Columns": df.shape[1],
+                "Missing Values": df.isnull().sum().sum()
+            })
 
     st.divider()
-    st.markdown("#### Select Agent & Configure")
+    st.markdown("#### 📈 Dataset Summary")
+    summary_df = pd.DataFrame(summary_stats)
+    st.dataframe(summary_df, use_container_width=True)
 
+    st.divider()
+    st.markdown("#### 🤖 Select Agent for Deep Learning Analysis")
+    
     if not st.session_state.squads:
-        st.error("No agents loaded.")
+        st.error("No agents loaded. Please ensure agents.yaml exists.")
         return
 
     flat_agents = {}
     for sname, agents in st.session_state.squads.items():
         for aname, cfg in agents.items():
             flat_agents[f"{sname} / {aname}"] = cfg
-    
-    selected_agent_key = st.selectbox("Choose agent", options=list(flat_agents.keys()), key="tab8_agent_select")
+
+    selected_agent_key = st.selectbox("Choose an agent", options=list(flat_agents.keys()), key="tab8_agent_select")
     agent_cfg = copy.deepcopy(flat_agents[selected_agent_key])
 
     with st.expander("⚙️ Agent Configuration", expanded=False):
-        agent_cfg['system_prompt'] = st.text_area("System Prompt", value=agent_cfg.get('system_prompt', ''), height=150, key="tab8_prompt")
+        agent_cfg['system_prompt'] = st.text_area(
+            "System Prompt", 
+            value=agent_cfg.get('system_prompt', ''),
+            height=150,
+            key="tab8_prompt",
+            help="Customize the agent's instructions for deep learning analysis"
+        )
         
         params = agent_cfg.get('params', {})
         col1, col2, col3 = st.columns(3)
         with col1:
             p_temp = st.slider("Temperature", 0.0, 1.0, float(params.get('temperature', 0.3)), 0.05, key="tab8_temp")
         with col2:
-            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab8_tp")
+            p_top_p = st.slider("Top P", 0.0, 1.0, float(params.get('top_p', 0.9)), 0.05, key="tab8_top_p")
         with col3:
             p_max = st.number_input("Max Tokens", 256, 65536, int(params.get('max_output_tokens', 8192)), 256, key="tab8_max")
         agent_cfg['params'] = {'temperature': p_temp, 'top_p': p_top_p, 'max_output_tokens': p_max}
@@ -1299,7 +1201,7 @@ def tab8_ui():
     st.divider()
     if st.button("🚀 Run Deep Learning Analysis", type="primary", key="tab8_run"):
         if not st.session_state.selected_model:
-            st.error("No model selected in sidebar.")
+            st.error("Please select a model from the sidebar.")
         else:
             client = st.session_state.gemini_client if 'gemini' in st.session_state.selected_model else st.session_state.grok_client
             executor = AgentExecutor(st.session_state.selected_model, client)
@@ -1312,48 +1214,31 @@ def tab8_ui():
                     st.warning(f"Could not parse JSON for {dsid}. Sending as raw text.")
                     assembled_payload[dsid] = json_text
             
-            dl_prompt = f"""DEEP LEARNING SCIENTIST ANALYSIS:
+            content_for_agent = f"""DEEP LEARNING ANALYSIS REQUEST
+
+You are a Deep Learning Scientist. Analyze the following collection of datasets and provide comprehensive insights.
 
 DATASETS:
 {json.dumps(assembled_payload, indent=2, ensure_ascii=False)}
 
-Please provide a comprehensive deep learning-oriented analysis including:
+DATASET SUMMARY:
+{summary_df.to_markdown()}
 
-1. **Data Understanding & Exploration**
-   - Dataset summaries and statistics
-   - Feature distributions and correlations
-   - Data quality assessment
-
-2. **Feature Engineering Recommendations**
-   - Suggested derived features
-   - Encoding strategies for categorical variables
-   - Dimensionality reduction opportunities
-
-3. **Deep Learning Architecture Recommendations**
-   - Suitable model architectures (e.g., CNN, RNN, Transformer, etc.)
-   - Rationale for each recommendation
-   - Hyperparameter suggestions
-
-4. **Training Strategy**
-   - Data split recommendations
-   - Batch size and learning rate suggestions
-   - Regularization techniques
-
-5. **Evaluation Metrics**
-   - Appropriate metrics for the problem
-   - Validation strategies
-
-6. **Visualization Recommendations**
-   - Key plots and charts to generate
-   - Feature importance visualizations
-
-7. **Actionable Next Steps**
-   - Prioritized action items
-   - Potential challenges and mitigation strategies
+Please provide:
+1. **Data Exploration**: Comprehensive overview of each dataset
+2. **Feature Engineering**: Suggestions for new features and transformations
+3. **Relationships**: Cross-dataset relationships and potential joins
+4. **ML Opportunities**: Specific machine learning and deep learning approaches
+5. **Model Recommendations**: Suitable models (classification, regression, clustering, etc.)
+6. **Training Strategy**: Data splitting, validation approach, hyperparameter tuning
+7. **Advanced Techniques**: Transfer learning, ensemble methods, neural architecture suggestions
+8. **Visualization Ideas**: Key plots and dashboards for insights
+9. **Implementation Roadmap**: Step-by-step plan for building ML pipeline
+10. **Potential Challenges**: Data quality issues, class imbalance, etc.
 """
             
-            with st.spinner(f"Agent '{agent_cfg['name']}' is running deep learning analysis..."):
-                result = executor.execute(agent_cfg, dl_prompt, context=None)
+            with st.spinner(f"Agent '{agent_cfg['name']}' is running deep analysis... This may take a moment."):
+                result = executor.execute(agent_cfg, content_for_agent, context=None)
                 st.session_state.multi_dataset_result = result
                 st.rerun()
 
@@ -1367,12 +1252,29 @@ Please provide a comprehensive deep learning-oriented analysis including:
             with st.expander("📄 View Full Deep Learning Report", expanded=True):
                 st.markdown(agent_text)
             
-            st.download_button(
-                label="💾 Download Deep Learning Report (Markdown)",
-                data=agent_text,
-                file_name=f"deep_learning_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown"
-            )
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.download_button(
+                    label="💾 Download Full Report",
+                    data=agent_text,
+                    file_name=f"deep_learning_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown"
+                )
+            with col2:
+                st.download_button(
+                    label="💾 Download Dataset Summary",
+                    data=summary_df.to_csv(index=False),
+                    file_name=f"dataset_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+            with col3:
+                all_json = json.dumps(assembled_payload, indent=2, ensure_ascii=False)
+                st.download_button(
+                    label="💾 Download Combined JSON",
+                    data=all_json,
+                    file_name=f"combined_datasets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
         else:
             st.error(f"❌ Agent Error: {res.get('error')}")
 
@@ -1386,6 +1288,7 @@ def main():
     render_sidebar()
     
     st.title("🤖 Multi-Agent Analysis System")
+    st.markdown("*Powered by AI agents for comprehensive data and document analysis*")
     
     tabs = st.tabs([
         "🔬 Analysis",
@@ -1393,10 +1296,8 @@ def main():
         "🔗 Workflow",
         "📊 Data Analysis",
         "📈 Comparison",
-        "📄 Document OCR (v1)",
-        "📊 Multi-Dataset (v1)",
         "📄 Document Scientist",
-        "📊 Deep Learning Scientist"
+        "🧠 Deep Learning Scientist"
     ])
     
     with tabs[0]:
@@ -1408,7 +1309,7 @@ def main():
         
         if st.session_state.squads:
             for squad_name, agents in st.session_state.squads.items():
-                with st.expander(f"**{squad_name}** ({len(agents)} agents)"):
+                with st.expander(f"**{squad_name}** ({len(agents)} agents)", expanded=False):
                     for agent_name, agent in agents.items():
                         st.markdown(f"""
                         <div class="agent-card">
@@ -1420,4 +1321,74 @@ def main():
                         """, unsafe_allow_html=True)
     
     with tabs[2]:
-        st.header("🔗 Multi-Agent Workflow
+        st.header("🔗 Multi-Agent Workflow")
+        st.info("Create workflows that chain multiple agents together.")
+        
+        if st.session_state.selected_squad:
+            squad = st.session_state.squads[st.session_state.selected_squad]
+            
+            st.markdown("#### Build Workflow")
+            num_agents = st.number_input("Number of agents in workflow", 
+                                        min_value=2, max_value=5, value=2)
+            
+            workflow_agents = []
+            for i in range(num_agents):
+                agent_name = st.selectbox(
+                    f"Agent {i+1}",
+                    options=list(squad.keys()),
+                    key=f"workflow_agent_{i}"
+                )
+                workflow_agents.append(squad[agent_name])
+            
+            content = st.text_area("Initial Content", height=200)
+            
+            if st.button("🚀 Execute Workflow", type="primary"):
+                client = (st.session_state.gemini_client 
+                         if 'gemini' in st.session_state.selected_model 
+                         else st.session_state.grok_client)
+                
+                executor = AgentExecutor(st.session_state.selected_model, client)
+                orchestrator = WorkflowOrchestrator(executor)
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                def update_progress(idx, total, agent_name):
+                    progress_bar.progress((idx + 1) / total)
+                    status_text.text(f"Stage {idx+1}/{total}: {agent_name}")
+                
+                results = orchestrator.execute_workflow(
+                    workflow_agents, content, update_progress
+                )
+                
+                st.session_state.workflow_results = results
+                st.rerun()
+            
+            if st.session_state.workflow_results:
+                st.divider()
+                st.header("📊 Workflow Results")
+                
+                for idx, result in enumerate(st.session_state.workflow_results):
+                    with st.expander(f"Stage {idx+1}: {result['agent_name']}", expanded=(idx == len(st.session_state.workflow_results) - 1)):
+                        if result['status'] == 'success':
+                            st.success(f"✅ Completed")
+                            st.markdown(result['result'])
+                        else:
+                            st.error(f"❌ Failed: {result['error']}")
+        else:
+            st.warning("Please select a squad from the sidebar to build workflows.")
+    
+    with tabs[3]:
+        data_analysis_tab_ui()
+    
+    with tabs[4]:
+        comparison_tab_ui()
+    
+    with tabs[5]:
+        tab7_ui()
+    
+    with tabs[6]:
+        tab8_ui()
+
+if __name__ == "__main__":
+    main()
