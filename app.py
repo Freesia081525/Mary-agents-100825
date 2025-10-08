@@ -24,7 +24,7 @@ from PyPDF2 import PdfReader
 AGENTS_FILE = 'agents.yaml'
 GEMINI_MODEL = 'gemini-2.0-flash'
 GROK_MODEL = 'grok-3-mini'
-
+api_key = os.getenv("GEMINI_API_KEY")
 # --- THEMES ---
 THEMES = {
     "Deep Ocean": {
