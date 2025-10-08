@@ -1,0 +1,14 @@
+streamlit
+google-generativeai
+requests
+PyYAML
+PyMuPDF
+xai_sdk
+plotly
+httpx
+pydantic
+pdfplumber
+pyvis
+Pillow
+pytesseract
+PyPDF2
