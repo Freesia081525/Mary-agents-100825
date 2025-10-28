@@ -22,7 +22,7 @@ from PyPDF2 import PdfReader
 
 # --- CONFIGURATION ---
 AGENTS_FILE = 'agents.yaml'
-GEMINI_MODEL = 'gemini-2.0-flash'
+GEMINI_MODEL = 'gemini-2.5-flash'
 GROK_MODEL = 'grok-3-mini'
 # --- THEMES ---
 THEMES = {
